@@ -7,7 +7,7 @@ import open from 'open'
 import fs from 'fs'
 
 const logger = MAIN_LOGGER.child({})
-logger.level = 'trace'
+logger.level = process.env.PINO_LOG_LEVEL || 'info'
 
 const useStore = !process.argv.includes('--no-store')
 const doReplies = !process.argv.includes('--no-reply')
@@ -33,10 +33,12 @@ setInterval(() => {
 
 // start a connection
 const startSock = async() => {
+	logger.trace('startSock method called')
 	const { state, saveCreds } = await useMultiFileAuthState('baileys_auth_info')
 	// fetch latest version of WA Web
 	const { version, isLatest } = await fetchLatestBaileysVersion()
-	console.log(`using WA v${version.join('.')}, isLatest: ${isLatest}`)
+	//console.log(`using WA v${version.join('.')}, isLatest: ${isLatest}`)
+	logger.trace(`using WA v${version.join('.')}, isLatest: ${isLatest}`)
 
 	const sock = makeWASocket({
 		version,
@@ -168,16 +170,47 @@ const startSock = async() => {
 			if(events['connection.update']) {
 				const update = events['connection.update']
 				const { connection, lastDisconnect } = update
+				let reason = new Boom(lastDisconnect?.error)?.output?.statusCode
+
 				if(connection === 'close') {
-					// reconnect if not logged out
-					if((lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut) {
-						startSock()
+
+					if (reason === DisconnectReason.badSession) {
+						logger.error(`Bad Session, Please Delete /auth and Scan Again`)
+						process.exit()
+					} else if (reason === DisconnectReason.connectionClosed) {
+						logger.warn("Connection closed, reconnecting....");
+						await startSock()
+					} else if (reason === DisconnectReason.connectionLost) {
+						logger.warn("Connection Lost from Server, reconnecting...");
+						await startSock()
+					} else if (reason === DisconnectReason.connectionReplaced) {
+						logger.error("Connection Replaced, Another New Session Opened, Please Close Current Session First");
+						process.exit()
+					} else if (reason === DisconnectReason.loggedOut) {
+						logger.error(`Device Logged Out, Please Delete /auth and Scan Again.`)
+						process.exit()
+					} else if (reason === DisconnectReason.restartRequired) {
+						logger.info("Restart Required, Restarting...");
+						await startSock()
+					} else if (reason === DisconnectReason.timedOut) {
+						logger.warn("Connection TimedOut, Reconnecting...");
+						await startSock()
 					} else {
-						console.log('Connection closed. You are logged out.')
-					}
+						logger.warn(`Unknown DisconnectReason: ${reason}: ${connection}`);
+						await startSock()
+					} 
+					// reconnect if not logged out
+					// if((lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut) {
+					// 	startSock()
+					// } else {
+					// 	//console.log('Connection closed. You are logged out.')
+					// 	logger.trace('Connection closed. You are logged out.')
+					// }
 				}
 
-				console.log('connection update', update)
+				//console.log('connection update', update)
+				logger.trace('connection update', update)
+
 			}
 
 			// credentials updated -- save them
@@ -186,33 +219,41 @@ const startSock = async() => {
 			}
 
 			if(events['labels.association']) {
-				console.log(events['labels.association'])
+				//console.log(events['labels.association'])
+				logger.trace(events['labels.association'])
+
 			}
 
 
 			if(events['labels.edit']) {
-				console.log(events['labels.edit'])
+				//console.log(events['labels.edit'])
+				logger.trace(events['labels.edit'])
 			}
 
 			if(events.call) {
-				console.log('recv call event', events.call)
+				//console.log('recv call event', events.call)
+				logger.trace('recv call event', events.call)
 			}
 
 			// history received
 			if(events['messaging-history.set']) {
 				const { chats, contacts, messages, isLatest } = events['messaging-history.set']
-				console.log(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
+				//console.log(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
+				logger.trace(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
 			}
 
 			// received a new message
 			if(events['messages.upsert']) {
 				const upsert = events['messages.upsert']
-				console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
+				//console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
+				logger.trace('recv messages ', JSON.stringify(upsert, undefined, 2))
+
 
 				if(upsert.type === 'notify') {
 					for(const msg of upsert.messages) {
 						if(!msg.key.fromMe && doReplies) {
-							console.log('replying to', msg.key.remoteJid)
+							//console.log('replying to', msg.key.remoteJid)
+							logger.trace('replying to', msg.key.remoteJid)
 							await sock!.readMessages([msg.key])
 							await sendMessageWTyping({ text: 'Hello there!' }, msg.key.remoteJid!)
 						}
@@ -222,40 +263,51 @@ const startSock = async() => {
 
 			// messages updated like status delivered, message deleted etc.
 			if(events['messages.update']) {
-				console.log(
-					JSON.stringify(events['messages.update'], undefined, 2)
-				)
+				// console.log(
+				// 	JSON.stringify(events['messages.update'], undefined, 2)
+				// )
+				logger.trace(JSON.stringify(events['messages.update'], undefined, 2))
 
 				for(const { key, update } of events['messages.update']) {
 					if(update.pollUpdates) {
 						const pollCreation = await getMessage(key)
 						if(pollCreation) {
-							console.log(
-								'got poll update, aggregation: ',
+							logger.trace('got poll update, aggregation: ',
 								getAggregateVotesInPollMessage({
 									message: pollCreation,
 									pollUpdates: update.pollUpdates,
-								})
-							)
+								}))
+
+							// console.log(
+							// 	'got poll update, aggregation: ',
+							// 	getAggregateVotesInPollMessage({
+							// 		message: pollCreation,
+							// 		pollUpdates: update.pollUpdates,
+							// 	})
+							// )
 						}
 					}
 				}
 			}
 
 			if(events['message-receipt.update']) {
-				console.log(events['message-receipt.update'])
+				//console.log(events['message-receipt.update'])
+				logger.trace(events['message-receipt.update'])
 			}
 
 			if(events['messages.reaction']) {
-				console.log(events['messages.reaction'])
+				//console.log(events['messages.reaction'])
+				logger.trace(events['messages.reaction'])
 			}
 
 			if(events['presence.update']) {
-				console.log(events['presence.update'])
+				//console.log(events['presence.update'])
+				logger.trace(events['presence.update'])
 			}
 
 			if(events['chats.update']) {
-				console.log(events['chats.update'])
+				//console.log(events['chats.update'])
+				logger.trace(events['chats.update'])
 			}
 
 			if(events['contacts.update']) {
@@ -264,15 +316,17 @@ const startSock = async() => {
 						const newUrl = contact.imgUrl === null
 							? null
 							: await sock!.profilePictureUrl(contact.id!).catch(() => null)
-						console.log(
-							`contact ${contact.id} has a new profile pic: ${newUrl}`,
-						)
+							logger.trace(`contact ${contact.id} has a new profile pic: ${newUrl}`)
+						// console.log(
+						// 	`contact ${contact.id} has a new profile pic: ${newUrl}`,
+						// )
 					}
 				}
 			}
 
 			if(events['chats.delete']) {
-				console.log('chats deleted ', events['chats.delete'])
+				//console.log('chats deleted ', events['chats.delete'])
+				logger.trace('chats deleted ', events['chats.delete'])
 			}
 		}
 	)
