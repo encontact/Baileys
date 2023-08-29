@@ -38,7 +38,7 @@ const startSock = async() => {
 	// fetch latest version of WA Web
 	const { version, isLatest } = await fetchLatestBaileysVersion()
 	//console.log(`using WA v${version.join('.')}, isLatest: ${isLatest}`)
-	logger.trace(`using WA v${version.join('.')}, isLatest: ${isLatest}`)
+	//logger.trace(`using WA v${version.join('.')}, isLatest: ${isLatest}`)
 
 	const sock = makeWASocket({
 		version,
@@ -199,12 +199,12 @@ const startSock = async() => {
 						logger.warn(`Unknown DisconnectReason: ${reason}: ${connection}`);
 						await startSock()
 					} 
-					// reconnect if not logged out
+					// //reconnect if not logged out
 					// if((lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut) {
 					// 	startSock()
 					// } else {
-					// 	//console.log('Connection closed. You are logged out.')
-					// 	logger.trace('Connection closed. You are logged out.')
+					// 	console.log('Connection closed. You are logged out.')
+					// 	//logger.trace('Connection closed. You are logged out.')
 					// }
 				}
 
@@ -246,7 +246,7 @@ const startSock = async() => {
 			if(events['messages.upsert']) {
 				const upsert = events['messages.upsert']
 				//console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
-				logger.trace('recv messages ', JSON.stringify(upsert, undefined, 2))
+				logger.trace(console.log('recv messages ', JSON.stringify(upsert, undefined, 2)))
 
 
 				if(upsert.type === 'notify') {
@@ -263,51 +263,51 @@ const startSock = async() => {
 
 			// messages updated like status delivered, message deleted etc.
 			if(events['messages.update']) {
-				// console.log(
-				// 	JSON.stringify(events['messages.update'], undefined, 2)
-				// )
-				logger.trace(JSON.stringify(events['messages.update'], undefined, 2))
+				console.log(
+					JSON.stringify(events['messages.update'], undefined, 2)
+				)
+				//logger.trace(JSON.stringify(events['messages.update'], undefined, 2))
 
 				for(const { key, update } of events['messages.update']) {
 					if(update.pollUpdates) {
 						const pollCreation = await getMessage(key)
 						if(pollCreation) {
-							logger.trace('got poll update, aggregation: ',
-								getAggregateVotesInPollMessage({
-									message: pollCreation,
-									pollUpdates: update.pollUpdates,
-								}))
-
-							// console.log(
-							// 	'got poll update, aggregation: ',
+							// logger.trace('got poll update, aggregation: ',
 							// 	getAggregateVotesInPollMessage({
 							// 		message: pollCreation,
 							// 		pollUpdates: update.pollUpdates,
-							// 	})
-							// )
+							// 	}))
+
+							console.log(
+								'got poll update, aggregation: ',
+								getAggregateVotesInPollMessage({
+									message: pollCreation,
+									pollUpdates: update.pollUpdates,
+								})
+							)
 						}
 					}
 				}
 			}
 
 			if(events['message-receipt.update']) {
-				//console.log(events['message-receipt.update'])
-				logger.trace(events['message-receipt.update'])
+				console.log(events['message-receipt.update'])
+				//logger.trace(events['message-receipt.update'])
 			}
 
 			if(events['messages.reaction']) {
-				//console.log(events['messages.reaction'])
-				logger.trace(events['messages.reaction'])
+				console.log(events['messages.reaction'])
+				//logger.trace(events['messages.reaction'])
 			}
 
 			if(events['presence.update']) {
-				//console.log(events['presence.update'])
-				logger.trace(events['presence.update'])
+				console.log(events['presence.update'])
+				//logger.trace(events['presence.update'])
 			}
 
 			if(events['chats.update']) {
-				//console.log(events['chats.update'])
-				logger.trace(events['chats.update'])
+				console.log(events['chats.update'])
+				//logger.trace(events['chats.update'])
 			}
 
 			if(events['contacts.update']) {
@@ -316,17 +316,17 @@ const startSock = async() => {
 						const newUrl = contact.imgUrl === null
 							? null
 							: await sock!.profilePictureUrl(contact.id!).catch(() => null)
-							logger.trace(`contact ${contact.id} has a new profile pic: ${newUrl}`)
-						// console.log(
-						// 	`contact ${contact.id} has a new profile pic: ${newUrl}`,
-						// )
+							//logger.trace(`contact ${contact.id} has a new profile pic: ${newUrl}`)
+						console.log(
+							`contact ${contact.id} has a new profile pic: ${newUrl}`,
+						)
 					}
 				}
 			}
 
 			if(events['chats.delete']) {
-				//console.log('chats deleted ', events['chats.delete'])
-				logger.trace('chats deleted ', events['chats.delete'])
+				console.log('chats deleted ', events['chats.delete'])
+				//logger.trace('chats deleted ', events['chats.delete'])
 			}
 		}
 	)
