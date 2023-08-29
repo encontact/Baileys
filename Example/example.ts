@@ -219,41 +219,41 @@ const startSock = async() => {
 			}
 
 			if(events['labels.association']) {
-				//console.log(events['labels.association'])
-				logger.trace(events['labels.association'])
+				console.log(events['labels.association'])
+				//logger.trace(events['labels.association'])
 
 			}
 
 
 			if(events['labels.edit']) {
-				//console.log(events['labels.edit'])
-				logger.trace(events['labels.edit'])
+				console.log(events['labels.edit'])
+				//logger.trace(events['labels.edit'])
 			}
 
 			if(events.call) {
-				//console.log('recv call event', events.call)
-				logger.trace('recv call event', events.call)
+				console.log('recv call event', events.call)
+				//logger.trace('recv call event', events.call)
 			}
 
 			// history received
 			if(events['messaging-history.set']) {
 				const { chats, contacts, messages, isLatest } = events['messaging-history.set']
-				//console.log(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
-				logger.trace(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
+				console.log(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
+				//logger.trace(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
 			}
 
 			// received a new message
 			if(events['messages.upsert']) {
 				const upsert = events['messages.upsert']
-				//console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
-				logger.trace(console.log('recv messages ', JSON.stringify(upsert, undefined, 2)))
+				console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
+				//logger.trace(console.log('recv messages ', JSON.stringify(upsert, undefined, 2)))
 
 
 				if(upsert.type === 'notify') {
 					for(const msg of upsert.messages) {
 						if(!msg.key.fromMe && doReplies) {
-							//console.log('replying to', msg.key.remoteJid)
-							logger.trace('replying to', msg.key.remoteJid)
+							console.log('replying to', msg.key.remoteJid)
+							//logger.trace('replying to', msg.key.remoteJid)
 							await sock!.readMessages([msg.key])
 							await sendMessageWTyping({ text: 'Hello there!' }, msg.key.remoteJid!)
 						}
