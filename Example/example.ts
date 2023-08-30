@@ -9,6 +9,8 @@ import fs from 'fs'
 const logger = MAIN_LOGGER.child({})
 logger.level = 'trace'
 
+
+
 const useStore = !process.argv.includes('--no-store')
 const doReplies = !process.argv.includes('--no-reply')
 const usePairingCode = process.argv.includes('--use-pairing-code')
