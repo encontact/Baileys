@@ -7,7 +7,7 @@ import open from 'open'
 import fs from 'fs'
 
 const logger = MAIN_LOGGER.child({})
-logger.level = 'trace'
+logger.level = 'debug'
 
 
 
@@ -211,7 +211,7 @@ const startSock = async() => {
 				}
 
 				//console.log('connection update', update)
-				logger.trace('connection update', update)
+				logger.debug({update}, 'connection update')
 
 			}
 
@@ -240,14 +240,14 @@ const startSock = async() => {
 			// history received
 			if(events['messaging-history.set']) {
 				const { chats, contacts, messages, isLatest } = events['messaging-history.set']
-				console.log(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
+				//console.log(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
 				logger.info(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`, 'messaging-history.set')
 			}
 
 			// received a new message
 			if(events['messages.upsert']) {
 				const upsert = events['messages.upsert']
-				console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
+				//console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
 				logger.info(JSON.stringify(upsert, undefined, 2), 'recv messages ')
 
 
@@ -265,9 +265,9 @@ const startSock = async() => {
 
 			// messages updated like status delivered, message deleted etc.
 			if(events['messages.update']) {
-				console.log(
-					JSON.stringify(events['messages.update'], undefined, 2)
-				)
+				// console.log(
+				// 	JSON.stringify(events['messages.update'], undefined, 2)
+				// )
 				logger.info(JSON.stringify(events['messages.update'], undefined, 2), 'messages.update')
 
 				for(const { key, update } of events['messages.update']) {
@@ -293,22 +293,22 @@ const startSock = async() => {
 			}
 
 			if(events['message-receipt.update']) {
-				console.log(events['message-receipt.update'])
+				//console.log(events['message-receipt.update'])
 				logger.info(events['message-receipt.update'], 'message-receipt.update')
 			}
 
 			if(events['messages.reaction']) {
-				console.log(events['messages.reaction'])
+				//console.log(events['messages.reaction'])
 				logger.info(events['messages.reaction'], 'messages.reaction')
 			}
 
 			if(events['presence.update']) {
-				console.log(events['presence.update'])
+				//console.log(events['presence.update'])
 				logger.info(events['presence.update'], 'presence.update')
 			}
 
 			if(events['chats.update']) {
-				console.log(events['chats.update'])
+				//console.log(events['chats.update'])
 				logger.info(events['chats.update'], 'chats.update')
 			}
 
@@ -327,7 +327,7 @@ const startSock = async() => {
 			}
 
 			if(events['chats.delete']) {
-				console.log('chats deleted ', events['chats.delete'])
+				//console.log('chats deleted ', events['chats.delete'])
 				logger.info(events['chats.delete'], 'chats deleted ')
 			}
 		}
