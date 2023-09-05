@@ -6,10 +6,16 @@ import MAIN_LOGGER from '../src/Utils/logger'
 import open from 'open'
 import fs from 'fs'
 
+import express from 'express'
+
 const logger = MAIN_LOGGER.child({})
 logger.level = 'debug'
 
-
+const app = express()
+const port = 3000
+app.get('/', (req, res) => {
+    res.send('Hello World!')
+})
 
 const useStore = !process.argv.includes('--no-store')
 const doReplies = !process.argv.includes('--no-reply')
@@ -47,6 +53,7 @@ const startSock = async() => {
 		logger,
 		printQRInTerminal: !usePairingCode,
 		mobile: useMobile,
+		keepAliveIntervalMs: 30_000,
 		auth: {
 			creds: state.creds,
 			/** caching makes the store faster to send/recv messages */
@@ -346,4 +353,8 @@ const startSock = async() => {
 	}
 }
 
-startSock()
+
+app.listen(port, () => {
+	startSock()
+	console.log(`Example app listening at http://localhost:${port}`)
+})
