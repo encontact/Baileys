@@ -1,21 +1,193 @@
 import { Boom } from '@hapi/boom'
 import NodeCache from 'node-cache'
 import readline from 'readline'
-import makeWASocket, { AnyMessageContent, delay, DisconnectReason, fetchLatestBaileysVersion, getAggregateVotesInPollMessage, makeCacheableSignalKeyStore, makeInMemoryStore, PHONENUMBER_MCC, proto, useMultiFileAuthState, WAMessageContent, WAMessageKey } from '../src'
+import makeWASocket, { 
+	AnyMessageContent, 
+	delay, 
+	DisconnectReason, 
+	fetchLatestBaileysVersion, 
+	getAggregateVotesInPollMessage, 
+	makeCacheableSignalKeyStore, 
+	makeInMemoryStore, 
+	PHONENUMBER_MCC, 
+	proto, 
+	useMultiFileAuthState, 
+	WAMessageContent, 
+	WAMessageKey,
+	WAMessage,
+	downloadContentFromMessage,
+	WAConnectionState 
+} from '../src'
+import QRCode from 'qrcode'
 import MAIN_LOGGER from '../src/Utils/logger'
+import generateMessageUid from '../src/Utils/generateMessageUid'
+import { MessageDispatcher } from '../src/Models/MessageDispatcher'
+import { WhatsappStatus } from '../src/Models/WhatsappStatus'
+
+import { FileSystemTokensManager } from '../src/Services/FileSystemTokensManager'
+import  AxiosMessageDispatcher  from '../src/Services/AxiosMessageDispatcher'
 import open from 'open'
 import fs from 'fs'
-
 import express from 'express'
+
+const MsgType = [
+	'conversation',
+	'extendedTextMessage',
+	'imageMessage',
+	'stickerMessage',
+	'videoMessage',
+	'audioMessage',
+	'documentMessage',
+	'documentWithCaptionMessage',
+	'contactMessage',
+	'contactsArrayMessage',
+	'protocolMessage',
+	'reactionMessage',
+  ] as const
+  type MsgType = (typeof MsgType)[number]
+
 
 const logger = MAIN_LOGGER.child({})
 logger.level = 'debug'
 
-const app = express()
-const port = 3000
-app.get('/', (req, res) => {
-    res.send('Hello World!')
+let lastConnectionState :WAConnectionState 
+let qrCode: string | null = null
+
+const tokensManager = new FileSystemTokensManager()
+const messageDispatcher = new AxiosMessageDispatcher(
+  tokensManager,
+  logger.child({}, { msgPrefix: '[AxiosMessageDispatcher] ', level: 'error' }),
+)
+
+tokensManager.getToken().then(token => {
+	if (token?.sessionName) {
+	  messageDispatcher.changeSessionName(token.sessionName)
+	}
+	if (token?.hook) {
+	  messageDispatcher.changeHook(token.hook)
+	}
+	if (token?.lastSuccessfullHookCallTimestamp) {
+	  messageDispatcher.changeLastSuccessfullHookCall(
+		token.lastSuccessfullHookCallTimestamp,
+	  )
+	}
 })
+
+
+let socket: any  
+
+const app = express()
+app.use(express.json()) 
+const port = 3333
+
+// end points ******
+app.get('/', (req, res) => {
+    res.send('get method Hello World!')
+})
+
+app.get('/close', (req, res) => {
+	res.send('get method close')
+})
+
+
+app.get('/logout', (req, res) => {
+	res.send('get method logout')
+})
+
+app.get('/status', (req, res) => {
+	logger.debug('getStatus method called')
+	let result :any 
+
+    if (lastConnectionState === 'open')  
+		result = WhatsappStatus.CONNECTED
+    if (lastConnectionState === 'connecting' && qrCode)
+        result = WhatsappStatus.QRCODE
+	if (lastConnectionState === 'connecting')
+		result =  WhatsappStatus.CONNECTING
+
+	res.status(200).json({ success: true, data: { status: result } })
+})
+
+app.get('/qrCode', (req, res) => {
+	logger.debug('getQrCode method called')
+
+	if (qrCode === null) {
+		logger.debug('QRCode not available')
+		//throw new Error('QRCode not available')
+	  }
+
+	  qrCode = QRCode.toDataURL(qrCode)
+
+	  res.status(200).json({ success: true, data: { qrCode } })
+})
+
+app.get('/getChat', async (req, res) => {
+
+	let sessionName = req.query.sessionName
+	let id: string = req.query.chatId as string
+	const metadata = await socket.groupMetadata(id).catch(() => null)
+	if (!metadata) return res.status(500).json({ success: false, message: 'NOTFOUND' })
+
+	const isAdmin = metadata.participants.some(
+		contact =>
+		  contact.admin &&
+		  contact.id === socket?.user?.id.split(':')[0] + '@s.whatsapp.net',
+	  )
+
+	  const group =  {
+		id: metadata.id,
+		subject: metadata.subject,
+		description: metadata.subject,
+		isAdmin,
+		isAnnounce: metadata.announce || false,
+	  }
+
+	  const result = {
+		id: group.id,
+		name: group.subject,
+		isReadOnly: group.isAnnounce && !group.isAdmin,
+		IsAnnounceGrpRestrict: group.isAnnounce && !group.isAdmin,
+		Contact: {},
+	  }
+
+	res.status(200).json({ success: true, result })
+})
+
+app.post('/sendText', async (req, res) => {
+	let body = req.body
+	const { number, sessionName, text  } = body
+	//await wASocket.sendMessageWTyping(text, sessionName)
+	let msg: AnyMessageContent = { text: text }
+	// Emulates typing states
+	await socket.presenceSubscribe(number)
+	await delay(500)
+
+	await socket.sendPresenceUpdate('composing', number)
+	await delay(2000)
+
+	await socket.sendPresenceUpdate('paused', number)
+	//
+	const sendedMessage = await socket.sendMessage(number, msg)
+
+	let remoteJid = sendedMessage.key.remoteJid
+    if (remoteJid?.includes(':')) {
+      remoteJid = remoteJid.split(':')[0] + '@g.us'
+    }
+
+	const { messageRef: newMessageRef } =
+	{
+		messageRef: generateMessageUid({
+		  fromMe: sendedMessage.key.fromMe,
+		  jid: remoteJid,
+		  messageId: sendedMessage.key.id,
+		})
+	}
+
+	res.json({ success: true, data: { id: newMessageRef } })
+})
+
+
+
 
 const useStore = !process.argv.includes('--no-store')
 const doReplies = !process.argv.includes('--no-reply')
@@ -178,7 +350,12 @@ const startSock = async() => {
 			// maybe it closed, or we received all offline message or connection opened
 			if(events['connection.update']) {
 				const update = events['connection.update']
-				const { connection, lastDisconnect } = update
+				const { connection, lastDisconnect, qr, isNewLogin } = update
+
+				if (connection === 'close' || connection === 'open' || connection === 'connecting')
+					lastConnectionState = connection as WAConnectionState
+				logger.info(`lastConnectionState: ${lastConnectionState}`);
+
 				let reason = new Boom(lastDisconnect?.error)?.output?.statusCode
 
 				if(connection === 'close') {
@@ -208,15 +385,11 @@ const startSock = async() => {
 						logger.warn(`Unknown DisconnectReason: ${reason}: ${connection}`);
 						await startSock()
 					} 
-					// //reconnect if not logged out
-					// if((lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut) {
-					// 	startSock()
-					// } else {
-					// 	console.log('Connection closed. You are logged out.')
-					// 	//logger.trace('Connection closed. You are logged out.')
-					// }
 				}
 
+
+				if (isNewLogin) qrCode = null
+      			if (qr) qrCode = qr
 				//console.log('connection update', update)
 				logger.debug({update}, 'connection update')
 
@@ -244,49 +417,107 @@ const startSock = async() => {
 				//logger.trace('recv call event', events.call)
 			}
 
+			const syncMessagesAfterTimestamp = messageDispatcher.getLastSuccessfullHookCall()
+			
 			// history received
-			if(events['messaging-history.set']) {
+			if (syncMessagesAfterTimestamp) {
+			  if(events['messaging-history.set']) {
 				const { chats, contacts, messages, isLatest } = events['messaging-history.set']
-				//console.log(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`)
-				logger.info(`recv ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`, 'messaging-history.set')
-			}
+				logger.info(`recv messaging-history.set:: ${chats.length} chats, ${contacts.length} contacts, ${messages.length} msgs (is latest: ${isLatest})`, 'messaging-history.set')
+
+				const processedMessages = await Promise.all(
+					messages
+					  .filter(message => {
+						if (!message.messageTimestamp) return false
+						const needToSync =
+						  typeof message.messageTimestamp === 'number'
+							? message.messageTimestamp > syncMessagesAfterTimestamp
+							: message.messageTimestamp.toNumber() >
+							  syncMessagesAfterTimestamp
+						if (!needToSync) return false
+						return true
+					  })
+					  .map(async message => {
+						return await processMessage(message)
+					  }),
+				  )
+
+				  processedMessages.sort((a, b) => {
+					return a.messageTimestamp.toNumber() - b.messageTimestamp.toNumber()
+				  })
+
+				  processedMessages.forEach(message => {
+					messageDispatcher.dispatch(message)
+				  })
+
+			  }
+		    }
 
 			// received a new message
 			if(events['messages.upsert']) {
 				const upsert = events['messages.upsert']
-				//console.log('recv messages ', JSON.stringify(upsert, undefined, 2))
-				logger.info(JSON.stringify(upsert, undefined, 2), 'recv messages ')
+				logger.debug('recv messages ::' + JSON.stringify(upsert, undefined, 2), 'recv messages ')
 
-
-				if(upsert.type === 'notify') {
-					for(const msg of upsert.messages) {
-						if(!msg.key.fromMe && doReplies) {
-							console.log('replying to', msg.key.remoteJid)
-							//logger.trace('replying to', msg.key.remoteJid)
-							await sock!.readMessages([msg.key])
-							await sendMessageWTyping({ text: 'Hello there!' }, msg.key.remoteJid!)
-						}
+				upsert.messages.forEach(async message => {
+					logger.debug('recv Each messages: ', message)
+					const processedMessage = await processMessage(message)
+					if (processedMessage) {
+						console.log('messageDispatcher.dispatch: ', processedMessage)
+						logger.debug('messageDispatcher.dispatch: ', processedMessage)
+						messageDispatcher.dispatch(processedMessage)
 					}
-				}
+				  })
+
+
+				// if(upsert.type === 'notify') {
+				// 	for(const msg of upsert.messages) {
+				// 		if(!msg.key.fromMe && doReplies) {
+				// 			console.log('replying to', msg.key.remoteJid)
+				// 			logger.debug('replying to', msg.key.remoteJid)
+				// 			await sock!.readMessages([msg.key])
+				// 			//await sendMessageWTyping({ text: 'Hello there!' }, msg.key.remoteJid!)
+				// 		}
+				// 	}
+				// }
 			}
 
 			// messages updated like status delivered, message deleted etc.
 			if(events['messages.update']) {
-				// console.log(
-				// 	JSON.stringify(events['messages.update'], undefined, 2)
-				// )
 				logger.info(JSON.stringify(events['messages.update'], undefined, 2), 'messages.update')
+
+				const messages = events['messages.update']
+
+				messages.forEach(async message => {
+					if (message.key.fromMe && message.update?.status) {
+					  let remoteJid = message.key.remoteJid
+					  if (remoteJid?.includes(':')) {
+						remoteJid = remoteJid.split(':')[0] + '@s.whatsapp.net'
+					  }
+			
+					  const processedMessage = {
+						id: generateMessageUid({
+						  fromMe: message.key.fromMe,
+						  jid: remoteJid,
+						  messageId: message.key.id,
+						}),
+						type: 'chat',
+						self: 'out',
+						ack: getAck(message.update?.status),
+						from: remoteJid,
+						to: socket?.user?.id.split(':')[0] + '@s.whatsapp.net',
+						...message,
+					  }
+			
+					  messageDispatcher.dispatch(processedMessage)
+					}
+				  })
+
+
 
 				for(const { key, update } of events['messages.update']) {
 					if(update.pollUpdates) {
 						const pollCreation = await getMessage(key)
 						if(pollCreation) {
-							// logger.trace('got poll update, aggregation: ',
-							// 	getAggregateVotesInPollMessage({
-							// 		message: pollCreation,
-							// 		pollUpdates: update.pollUpdates,
-							// 	}))
-
 							console.log(
 								'got poll update, aggregation: ',
 								getAggregateVotesInPollMessage({
@@ -301,8 +532,34 @@ const startSock = async() => {
 
 			if(events['message-receipt.update']) {
 				//console.log(events['message-receipt.update'])
+				const receipts = events['message-receipt.update']
 				logger.info(events['message-receipt.update'], 'message-receipt.update')
+				logger.info({ receipts }, 'message-receipt.update::')
+
+				receipts.forEach(async receipt => {
+					let remoteJid = receipt.key.remoteJid
+					if (remoteJid?.includes(':')) {
+					  remoteJid = remoteJid.split(':')[0] + '@g.us'
+					}
+					const processedMessage = {
+						id: generateMessageUid({
+						  fromMe: receipt.key.fromMe,
+						  jid: remoteJid,
+						  messageId: receipt.key.id,
+						}),
+						type: 'chat',
+						self: 'out',
+						ack: '2',
+						from: remoteJid,
+						to: socket?.user?.id.split(':')[0] + '@s.whatsapp.net',
+						...receipt,
+					  }
+			  
+					  messageDispatcher.dispatch(processedMessage)
+					})
 			}
+
+
 
 			if(events['messages.reaction']) {
 				//console.log(events['messages.reaction'])
@@ -354,7 +611,299 @@ const startSock = async() => {
 }
 
 
+const getAck = (ack: proto.WebMessageInfo.Status | null) => {
+    logger.debug({ ack }, 'getAck method called')
+    if (ack == proto.WebMessageInfo.Status.PLAYED) return '4'
+    if (ack == proto.WebMessageInfo.Status.SERVER_ACK) return '1'
+    if (ack == proto.WebMessageInfo.Status.DELIVERY_ACK) return '2'
+    if (ack == proto.WebMessageInfo.Status.READ) return '3'
+  }
+
+
+const downloadMessage = async (msg: any, msgType: any) => {
+    logger.debug({ msgType }, 'downloadMessage method called')
+    let buffer = Buffer.from([])
+    try {
+      const stream = await downloadContentFromMessage(msg, msgType)
+      for await (const chunk of stream) {
+        buffer = Buffer.concat([buffer, chunk])
+      }
+    } catch {
+      return logger.error('Error downloading file-message')
+    }
+    return buffer.toString('base64')
+  }
+
+const findMsgType = (message: WAMessageContent): MsgType | null => {
+    logger.debug('findMsgType method called')
+    for (const type of MsgType) {
+      if (message[type]) {
+        return type
+      }
+    }
+    return null
+  }
+
+let processMessage = async (msg: WAMessage): Promise<any> => {
+    logger.debug('processMessage method called')
+    const messageType =
+      (msg.message && findMsgType(msg.message)) || 'unsupported'
+	  logger.debug(`messageType: ${messageType}`)
+
+    const isSenderKeyDistributionMessage =
+      msg.message && !!msg.message['senderKeyDistributionMessage']
+	  logger.debug(`isSenderKeyDistributionMessage: ${isSenderKeyDistributionMessage}`)
+
+    const groupId = msg.message?.senderKeyDistributionMessage?.groupId
+    const firstGroupMessage =
+      groupId == msg.key?.remoteJid &&
+      groupId?.includes('@g.us') &&
+      msg.key?.remoteJid?.includes('@g.us')
+
+    if (
+      ['senderKeyDistributionMessage'].includes(messageType) &&
+      !firstGroupMessage
+    ) {
+      return
+    }
+
+    //if (!msg.key.fromMe && !msg.key.remoteJid?.includes('broadcast')) {
+	if (!msg.key.remoteJid?.includes('broadcast')) {
+      const msgId = generateMessageUid({
+        fromMe: msg.key.fromMe,
+        jid: msg.key.remoteJid,
+        messageId: msg.key.id,
+      })
+      const IsGroupMessage = msgId.includes('@g.us')
+	  logger.debug(`IsGroupMessage: ${IsGroupMessage}`)
+
+      // Verificar se o messageType = "senderKeyDistributionMessage"
+      // Se for, deve ser feita as alterações no final do switch
+      // Além disso, o messageType muda pra ser o parametro da posição [2]
+
+      let wppMessage = {
+        ...msg,
+        id: msgId,
+        type: 'unsupported',
+        isGroupMsg: IsGroupMessage,
+        chatId: msg.key?.remoteJid,
+        self: 'in',
+        ack: '0',
+        from: msg.key.remoteJid,
+        to: socket?.user?.id.split(':')[0] + '@s.whatsapp.net',
+        fromMe: false,
+        sender: {
+          id: IsGroupMessage
+            ? msg.key.participant || msg.participant
+            : msg.key.remoteJid,
+          name: msg.pushName,
+        },
+      } as any
+      let contentBase64
+
+      switch (messageType) {
+        case 'conversation': {
+          wppMessage = {
+            ...wppMessage,
+            type: 'chat',
+            content: msg.message?.conversation,
+            body: msg.message?.conversation,
+          }
+          break
+        }
+
+        case 'extendedTextMessage': {
+          wppMessage = {
+            ...wppMessage,
+            type: 'chat',
+            content: msg.message?.extendedTextMessage?.text,
+            body: msg.message?.extendedTextMessage?.text,
+          }
+          break
+        }
+        case 'imageMessage':
+          contentBase64 = await downloadMessage(
+            msg.message?.imageMessage,
+            'image',
+          )
+
+          wppMessage = {
+            ...wppMessage,
+            type: 'image',
+            caption: msg.message?.imageMessage?.caption,
+            mimetype: msg.message?.imageMessage?.mimetype,
+            contentBase64,
+          }
+          break
+
+        case 'stickerMessage':
+          contentBase64 = await downloadMessage(
+            msg.message?.stickerMessage,
+            'sticker',
+          )
+
+          wppMessage = {
+            ...wppMessage,
+            type: 'sticker',
+            mimetype: msg.message?.stickerMessage?.mimetype,
+            contentBase64,
+          }
+          break
+
+        case 'videoMessage':
+          contentBase64 = await downloadMessage(
+            msg.message?.videoMessage,
+            'video',
+          )
+
+          wppMessage = {
+            ...wppMessage,
+            type: 'video',
+            caption: msg.message?.videoMessage?.caption,
+            mimetype: msg.message?.videoMessage?.mimetype,
+            contentBase64,
+          }
+          break
+
+        case 'audioMessage':
+          contentBase64 = await downloadMessage(
+            msg.message?.audioMessage,
+            'audio',
+          )
+
+          wppMessage = {
+            ...wppMessage,
+            type: 'audio',
+            mimetype: msg.message?.audioMessage?.mimetype,
+            contentBase64,
+          }
+          break
+
+        case 'documentMessage':
+          contentBase64 = await downloadMessage(
+            msg.message?.documentMessage,
+            'document',
+          )
+
+          wppMessage = {
+            ...wppMessage,
+            type: 'image',
+            caption: msg.message?.documentMessage?.caption,
+            mimetype: msg.message?.documentMessage?.mimetype,
+            fileName: msg.message?.documentMessage?.fileName,
+            contentBase64,
+          }
+          break
+
+        case 'documentWithCaptionMessage':
+          contentBase64 = await downloadMessage(
+            msg.message?.documentWithCaptionMessage?.message?.documentMessage,
+            'document',
+          )
+
+          wppMessage = {
+            ...wppMessage,
+            type: 'image',
+            caption:
+              msg.message?.documentWithCaptionMessage?.message?.documentMessage
+                ?.caption,
+            mimetype:
+              msg.message?.documentWithCaptionMessage?.message?.documentMessage
+                ?.mimetype,
+            fileName:
+              msg.message?.documentWithCaptionMessage?.message?.documentMessage
+                ?.fileName,
+            contentBase64,
+          }
+          break
+
+        case 'contactMessage':
+          wppMessage = {
+            ...wppMessage,
+            type: 'vcard',
+            body: msg.message?.contactMessage?.vcard,
+          }
+          break
+
+        case 'contactsArrayMessage':
+          wppMessage = {
+            ...wppMessage,
+            type: 'vcard',
+            vcardList: msg.message?.contactsArrayMessage?.contacts,
+          }
+          break
+
+        case 'protocolMessage':
+          if (
+            msg.message?.protocolMessage?.type ===
+            proto.Message.ProtocolMessage.Type.REVOKE
+          ) {
+            wppMessage = {
+              from: wppMessage.from,
+              to: wppMessage.to,
+              id: wppMessage.id,
+              refId: `${msg.key.fromMe}_${msg.key.remoteJid}_${msg.message?.protocolMessage?.key?.id}`,
+            }
+            return wppMessage
+          } else {
+            // Aqui, se a mensagem de protocolo não for do tipo revoke, ignora a mensagem
+            return null
+          }
+
+        case 'reactionMessage': {
+          // TODO: Reações a mensagens ainda não são suportadas
+          logger.info(
+            'Nova mensagem do tipo reação a mensagem (emoji), mas ainda não é suportado. Mensagem ignorada.',
+          )
+          return null
+        }
+        default:
+          break
+      }
+      if (isSenderKeyDistributionMessage) {
+        const groupConversationId = `${msg.key.fromMe}_${msg.key.remoteJid}_${
+          msg.key.id
+        }_${msg.participant || msg.key.participant}`
+
+        wppMessage = {
+          ...wppMessage,
+          id: groupConversationId,
+          chatId: groupId,
+          sender: {
+            ...wppMessage.sender,
+            id: msg.participant || msg.key.participant,
+          },
+        }
+      }
+      if (
+        msg.message &&
+        messageType !== 'unsupported' &&
+        msg.message[messageType] &&
+        Object.prototype.hasOwnProperty.call(
+          msg.message[messageType as keyof proto.IMessage],
+          'contextInfo',
+        )
+      ) {
+        const messageTypeObject = msg.message[
+          messageType as keyof proto.IMessage
+        ] as any
+        const quotedMsgId = `${msg.key.fromMe}_${messageTypeObject?.contextInfo.participant}_${messageTypeObject.contextInfo.stanzaId}`
+        wppMessage = {
+          ...wppMessage,
+          quotedMsgId,
+        }
+      }
+
+      return wppMessage
+    }
+  }
+
+
 app.listen(port, () => {
-	startSock()
+	 startSock()
+	.then(x => {
+		socket = x
+	 	//console.log(x)
+	 })
 	console.log(`Example app listening at http://localhost:${port}`)
 })
