@@ -284,6 +284,12 @@ export async function getAudioWaveform(buffer: Buffer | string | Readable, logge
 	}
 }
 
+//#region IOS Audio
+
+// Este foi um fork de uma possivel solução para o problema do 
+// PROD: https://enkilabs.atlassian.net/browse/PROD-2776
+// PR Baileys: https://github.com/WhiskeySockets/Baileys/pull/2648
+
 // --- PTT (voice note) Opus repacketization ---------------------------------
 // WhatsApp's native voice notes pack several 20ms SILK frames per Opus packet
 // (TOC "code 3", e.g. 3x20ms = 60ms). libopus/ffmpeg emit one frame per packet
@@ -489,7 +495,7 @@ export const repacketizePttOpus = async (
 	}
 }
 
-// TERMINA AQUI
+//#endregion
 
 export const toReadable = (buffer: Buffer) => {
 	const readable = new Readable({ read: () => {} })
