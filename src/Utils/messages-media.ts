@@ -286,7 +286,7 @@ export async function getAudioWaveform(buffer: Buffer | string | Readable, logge
 
 //#region IOS Audio
 
-// Este foi um fork de uma possivel solução para o problema do 
+// Este foi um fork de uma possivel solução para o problema do
 // PROD: https://enkilabs.atlassian.net/browse/PROD-2776
 // PR Baileys: https://github.com/WhiskeySockets/Baileys/pull/2648
 
@@ -409,7 +409,7 @@ const buildOggPage = (headerType: number, granule: number, serial: number, seq: 
  */
 
 export const repacketizeOggOpusToCode3 = (input: Buffer, framesPerPacket = 3): Buffer => { 
-	// guard against a non-terminating loop / invalid Opus frame count (RFC 6716: M <= 48)
+	//guard against a non-terminating loop / invalid Opus frame count (RFC 6716: M <= 48)
 	if (!Number.isInteger(framesPerPacket) || framesPerPacket < 1 || framesPerPacket > 48) {
 		throw new Error('framesPerPacket must be an integer between 1 and 48')
 	}
