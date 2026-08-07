@@ -152,7 +152,6 @@ export const prepareWAMessageMedia = async (
 	if (mediaType === 'audio' && uploadData.ptt === true) {
 		uploadData.media = await repacketizePttOpus(uploadData.media, options.options, logger)
 	}
-	
 	// check if cacheable + generate cache key
 	const cacheableKey =
 		typeof uploadData.media === 'object' &&
